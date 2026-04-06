@@ -61,3 +61,8 @@ jobs:
       - name: SonarQube skipped
         if: ${{ !(env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '') }}
         run: echo "SONAR_TOKEN ou SONAR_HOST_URL nao configurados. Etapa SonarQube ignorada."
+
+      - name: SAST with Semgrep
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: p/ci
