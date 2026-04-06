@@ -124,3 +124,70 @@ jobs:
           tags: |
             ${{ env.DOCKERHUB_USERNAME }}/js-api-cicd:latest
             ${{ env.DOCKERHUB_USERNAME }}/js-api-cicd:${{ github.sha }}
+
+  deploy_hml:
+    name: CD - Deploy Homolog + DAST
+    if: github.ref == 'refs/heads/main'
+    needs: container
+    runs-on: ubuntu-latest
+    env:
+      RENDER_HML_DEPLOY_HOOK: ${{ secrets.RENDER_HML_DEPLOY_HOOK }}
+      HML_APP_URL: ${{ secrets.HML_APP_URL }}
+
+    steps:
+      - name: Deploy Render Homolog
+        if: ${{ env.RENDER_HML_DEPLOY_HOOK != '' }}
+        run: |
+          status=$(curl -sS -o /tmp/render_hml_deploy_response.txt -w "%{http_code}" -X POST "$RENDER_HML_DEPLOY_HOOK")
+          echo "Render HML deploy hook HTTP status: $status"
+          echo "Render HML deploy hook response:"
+          cat /tmp/render_hml_deploy_response.txt || true
+          if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+            echo "Failed to trigger Render HML deploy hook."
+            exit 1
+          fi
+
+      - name: Wait for Homolog readiness
+        if: ${{ env.HML_APP_URL != '' }}
+        run: |
+          for i in {1..30}; do
+            if curl -fsS "$HML_APP_URL/healthz" > /dev/null; then
+              echo "Homolog app is ready."
+              exit 0
+            fi
+            echo "Attempt $i/30: app not ready yet, retrying in 10s..."
+            sleep 10
+          done
+          echo "Homolog app did not become ready in time."
+          exit 1
+
+      - name: DAST (OWASP ZAP Baseline)
+        if: ${{ env.HML_APP_URL != '' }}
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ env.HML_APP_URL }}
+          allow_issue_writing: false
+          fail_action: false
+
+  deploy_prod:
+    name: CD - Deploy Production
+    if: github.ref == 'refs/heads/main'
+    needs: deploy_hml
+    runs-on: ubuntu-latest
+    env:
+      RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
+    environment:
+      name: production
+
+    steps:
+      - name: Deploy Render Production
+        if: ${{ env.RENDER_PROD_DEPLOY_HOOK != '' }}
+        run: |
+          status=$(curl -sS -o /tmp/render_prod_deploy_response.txt -w "%{http_code}" -X POST "$RENDER_PROD_DEPLOY_HOOK")
+          echo "Render PROD deploy hook HTTP status: $status"
+          echo "Render PROD deploy hook response:"
+          cat /tmp/render_prod_deploy_response.txt || true
+          if [[ "$status" -lt 200 || "$status" -ge 300 ]]; then
+            echo "Failed to trigger Render PROD deploy hook."
+            exit 1
+          fi
