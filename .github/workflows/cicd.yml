@@ -14,6 +14,9 @@ jobs:
   ci:
     name: CI - Build, Lint, Test, Quality, SAST
     runs-on: ubuntu-latest
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
     defaults:
       run:
         working-directory: api-js
@@ -47,14 +50,14 @@ jobs:
         run: npm run test:integration
 
       - name: SonarQube scan
-        if: ${{ secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '' }}
+        if: ${{ env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '' }}
         uses: SonarSource/sonarqube-scan-action@v4.2.1
         with:
           projectBaseDir: api-js
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
 
       - name: SonarQube skipped
-        if: ${{ !(secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != '') }}
+        if: ${{ !(env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '') }}
         run: echo "SONAR_TOKEN ou SONAR_HOST_URL nao configurados. Etapa SonarQube ignorada."
