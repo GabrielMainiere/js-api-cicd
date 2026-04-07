@@ -11,8 +11,58 @@ permissions:
   contents: read
 
 jobs:
-  ci:
-    name: CI - Build, Lint, Test, Quality, SAST
+  build:
+    name: CI - Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-js
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api-js/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  lint:
+    name: CI - Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-js
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: api-js/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+  test_quality:
+    name: CI - Test and Quality
     runs-on: ubuntu-latest
     env:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -37,12 +87,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
-      - name: Lint
-        run: npm run lint
-
       - name: Unit tests
         run: npm run test:unit
 
@@ -62,6 +106,14 @@ jobs:
         if: ${{ !(env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != '') }}
         run: echo "SONAR_TOKEN ou SONAR_HOST_URL nao configurados. Etapa SonarQube ignorada."
 
+  sast:
+    name: CI - SAST
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: SAST with Semgrep
         uses: semgrep/semgrep-action@v1
         with:
@@ -70,7 +122,7 @@ jobs:
   container:
     name: Container - Lint, Build, Scan, Push
     if: github.ref == 'refs/heads/main'
-    needs: ci
+    needs: [build, lint, test_quality, sast]
     runs-on: ubuntu-latest
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -126,7 +178,7 @@ jobs:
             ${{ env.DOCKERHUB_USERNAME }}/js-api-cicd:${{ github.sha }}
 
   deploy_hml:
-    name: CD - Deploy Homolog + DAST
+    name: CD - Deploy Homolog
     if: github.ref == 'refs/heads/main'
     needs: container
     runs-on: ubuntu-latest
@@ -161,6 +213,15 @@ jobs:
           echo "Homolog app did not become ready in time."
           exit 1
 
+  dast_hml:
+    name: CD - DAST Homolog
+    if: github.ref == 'refs/heads/main'
+    needs: deploy_hml
+    runs-on: ubuntu-latest
+    env:
+      HML_APP_URL: ${{ secrets.HML_APP_URL }}
+
+    steps:
       - name: DAST (OWASP ZAP Baseline)
         if: ${{ env.HML_APP_URL != '' }}
         uses: zaproxy/action-baseline@v0.14.0
@@ -169,10 +230,14 @@ jobs:
           allow_issue_writing: false
           fail_action: false
 
+      - name: DAST skipped
+        if: ${{ env.HML_APP_URL == '' }}
+        run: echo "HML_APP_URL nao configurada. Etapa DAST ignorada."
+
   deploy_prod:
     name: CD - Deploy Production
     if: github.ref == 'refs/heads/main'
-    needs: deploy_hml
+    needs: dast_hml
     runs-on: ubuntu-latest
     env:
       RENDER_PROD_DEPLOY_HOOK: ${{ secrets.RENDER_PROD_DEPLOY_HOOK }}
